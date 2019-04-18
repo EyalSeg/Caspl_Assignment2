@@ -4,9 +4,12 @@ prompt_msglen equ $ - prompt_msg
 
 
 %define STDIN 0
+%define STRUCT_SIZE 5
 
 section .bss
-input_buffer resb 100
+input_buffer resb 80
+operand_stack resb STRUCT_SIZE * 4  ; [1 byte data | 4 bytes nextptr]
+operand_index resb 1
 
 section .text
 
@@ -22,70 +25,27 @@ align 16
      extern fgets
 
 main: 
+
+    mov [operand_index], byte 0 ; chaneg to -1!
+
     call prompt_input
-    call prompt_input
-    call prompt_input
+    call act_on_input
+    jmp main
 
     mov     eax, 1 ; exit
     mov     ebx, 0 ; return value
     int     0x80
 
-prompt_input:
+act_on_input:
     push    ebp             ; Save caller state
     mov     ebp, esp
     ;sub     esp, 4          ; Leave space for local var on stack
-    pushad                  ; Save some more caller state
+    pushad    
 
-    push prompt_msg
-    call printf
-    pop edx; remove promtmsg from stack
+    ; TODO: check first char in input buffer and call matching function
 
-    push input_buffer
-    call gets
-    pop edx
+    call store_operand
 
-    push input_buffer
-    call printf
-    pop edx; remove promtmsg from stack
-
-    
-    loop:
-        mov ah, 1
-        int 21h         ; read character into al
-
-        ; todo: check if endl
-
-
-; COPYPASTA https://stackoverflow.com/questions/21870702/assembly-how-to-convert-hex-input-to-decimal
-check_for_digit:
-        
-
-check_for_upper:
-        cmp al, 'A'     ; handle A-F
-        jl check_for_lower
-        cmp al, 'F'
-        jg check_for_lower
-        sub al, 'A'-10  ; convert to numeric value
-        jmp handle_num
-
-check_for_lower:
-        ; ASSUMES input is valid
-       ; cmp al, 'a'     ; handle a-f
-       ; jl handle_digit_error
-       ; cmp al, 'f'
-       ; jg handle_digit_error
-        sub al, 'a'-10  ; convert to numeric value
-
-
-handle_num:
-
-    
-    endloop:
-
-    ; TODO check if operator
-
-
-    ;mov eax, 6
 
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
@@ -94,25 +54,131 @@ handle_num:
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
 
-; not working
-charhex_to_decimal:
+store_operand:
     push    ebp             ; Save caller state
     mov     ebp, esp
     ;sub     esp, 4          ; Leave space for local var on stack
-    pushad                  ; Save some more caller state
+    pushad    
 
-    mov al, [ebp + 8]
+   mov ecx, input_buffer
+   xor ebx, ebx ; previous pointer
+   xor edx, edx
 
-    cmp al, '0'     ; handle 0-9
-    jl check_for_upper
-    cmp al, '9'
-    jg check_for_upper
-    sub al, '0'     ; convert to numeric value
-    jmp handle_num
+   store_operand_loop:
+    mov dl, [ecx]
+    inc ecx
+    cmp dl, 0
+    je store_operand_loop_end
+
+    push STRUCT_SIZE
+    call malloc
+    add esp, 4 ; discard STRUCT_SIZE from the stack
+
+    mov [eax + 1], ebx  ; writes the previous pointer to the end of the current struct
+    mov ebx, eax        ; store the current struct as the previous
+
+    ; convert edx from hex char to binary
+    push edx
+    call charhex_to_decimal
+    pop edx
+
+    ; move the converted result to [ebx]
+    mov [ebx], byte al
+
+    ; ; read the next char
+    mov dl, [ecx]
+    inc ecx
+    cmp dl, 0
+    je store_operand_loop_end
+
+    push edx
+    call charhex_to_decimal
+    pop edx
+
+    shl eax, 4  ; this second char is the significant part of the current input number
+    add al, byte [ebx]
+    mov al, byte [ebx]
+
+    jmp store_operand_loop
+
+    store_operand_loop_end:
+
+    ; inc the operand index
+    xor eax, eax
+    mov al, byte [operand_index]
+    inc al
+    mov byte [operand_index], al
+
+    ; write ebx to the operand stack
+    mov ecx, STRUCT_SIZE
+    mul ecx
+    mov [operand_stack + eax], ebx
 
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
     ;mov     eax, [ebp-4]    ; place returned value where caller can see it
    ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+; reads input into input_buffer
+prompt_input:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    push prompt_msg
+    call printf
+    pop edx; remove promptmsg from stack
+
+    push input_buffer
+    call gets
+    pop edx
+
+    ;push input_buffer
+    ;call printf
+    ;pop edx; remove inputbuffer from stack
+
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+
+; assuming input is valid, letters are uppercase
+charhex_to_decimal:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    mov al, [ebp + 8]
+
+    cmp al, 'A'
+    jge handle_char
+
+    jmp handle_num
+
+    ; if got here, the input is invalid!
+
+
+    handle_char:
+    sub al, 'A'
+    add al, 10
+
+    jmp charhex_to_decimal_ret
+
+    handle_num:
+    sub al, '0'
+
+    charhex_to_decimal_ret:
+
+    mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    mov     eax, [ebp-4]    ; place returned value where caller can see it
+    add     esp, 4          ; Restore caller state
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
