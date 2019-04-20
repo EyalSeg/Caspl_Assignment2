@@ -4,8 +4,9 @@
 section .data
     prompt_msg db  'calc: ', 0x0 
     current_operand_index db -1
-    print_hex db '%X', 10, 0
+    print_hex db '%X', 0
     print_char db '%c', 10, 0
+    print_newLine db 10, 0
 
 
 section .bss
@@ -43,12 +44,23 @@ act_on_input:
     ;sub     esp, 4          ; Leave space for local var on stack
     pushad                  ; Save some more caller state
 
-    ; push input_buffer
-    ; call printf
-    ; pop edx
 
-    call store_operand
-    call print_operand
+    mov al, [input_buffer]
+    cmp al, 'p'
+    je act_printandpop
+
+    call read_operand
+    push eax
+    call push_operand
+    pop eax
+
+    jmp act_on_input_end
+
+    act_printandpop:
+        call print_and_pop        
+        jmp act_on_input_end
+
+    act_on_input_end:
 
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
@@ -57,29 +69,64 @@ act_on_input:
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
 
+print_and_pop:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    call get_current_stack_address
+    mov ebx, [eax]
+
+    push ebx
+    call print_operand
+    pop ebx
+
+    call pop_stack
+
+    push eax
+    call free_operand
+    pop eax
+
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+; takes address to the operand as parameter
 print_operand:
     push    ebp             ; Save caller state
     mov     ebp, esp
     ;sub     esp, 4          ; Leave space for local var on stack
     pushad                  ; Save some more caller state
 
-    ; TODO: Get the operand index as a parameter
-    mov ebx, [operands_stack] ; contains the pointer to the node
+    mov ebx, [ebp + 8] ; contains the pointer to the node
 
-    print_operand_loop:
+    xor edi, edi ; counter
+    xor al, al
+    print_operand_enstackloop:
         cmp ebx, 0
-        je print_operand_end
+        je print_operand_printloop
 
         xor eax, eax
         mov al, [ebx]
+        push  eax
+        inc edi
         
-        push word [ebx+1]
-        push print_hex
-        call printf
-        add esp, 8 ; discard PRINT_HEX from the stack
-        
-        inc ebx
-        mov ebx, [ebx]
+        ;inc ebx
+        mov ebx, [ebx + 4] ; next ptr
+
+        jmp print_operand_enstackloop
+
+    
+    print_operand_printloop:
+        cmp edi, 0
+        je print_operand_end
+
+        xor eax, eax
+        pop eax
 
         push eax
         push print_hex
@@ -87,11 +134,16 @@ print_operand:
         add esp, 4 ; discard PRINT_HEX from the stack
         pop eax
 
+        dec edi
 
 
-        jmp print_operand_loop
+        jmp print_operand_printloop
         
     print_operand_end:
+        push print_newLine
+        call printf
+        add esp, 4 ; discard PRINT_newline from the stack
+
 
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
@@ -100,19 +152,18 @@ print_operand:
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
 
-; UNFINISHED
-store_operand:
+
+; reads operand from the input buffer, returns address to it
+read_operand:
     push    ebp             ; Save caller state
     mov     ebp, esp
-    ;sub     esp, 4          ; Leave space for local var on stack
+    sub     esp, 4          ; Leave space for local var on stack
     pushad   
 
     xor ebx, ebx ; previous node, init with null
     mov esi, input_buffer ; cursor. assuming input length < 80
 
-    ; NOTE that some c calls change ecx, edx!
-
-    store_operand_loop:
+    read_operand_loop:
     xor edi, edi
     xor ecx, ecx
     mov cl, byte [esi]
@@ -120,8 +171,7 @@ store_operand:
     inc esi
 
     cmp edi, 0
-    je store_operand_return
-
+    je read_operand_return 
 
     ;create a new struct
 
@@ -132,21 +182,17 @@ store_operand:
     ;add esp, 4 ; discard STRUCT_SIZE from the stack
     pop edx
 
-    push eax
-    push print_hex
-    call printf
-    add esp, 4 ; discard PRINT_HEX from the stack
-    pop eax
-
-    mov [eax + 1], ebx ; point the current node to the previous one
-    mov ebx, eax
+    mov dword [eax + 4], ebx  ; point the current node's nextptr to the previous one
+    mov ebx, eax        
     
     ; convert dh from hexa to binary
-    ; TODO: handle A-F
-    sub edi, '0'
+    push edi
+    call charhex_to_decimal
+    pop edi
+    mov edi, eax
 
     ;write the value to the current node
-    mov [ebx], edi
+    mov [ebx], al
 
     ; read the next char
     xor ecx, ecx
@@ -154,12 +200,14 @@ store_operand:
     inc esi
 
     cmp ecx, 0
-    je store_operand_return
+    je read_operand_return
 
 
     ; convert dl from hexa to binary
-    ; TODO: handle A-F
-    sub ecx, '0'
+    push ecx
+    call charhex_to_decimal
+    pop ecx
+    mov ecx, eax
 
     ; note that the left-most digit belongs to the 4 left bits
     shl edi, 4
@@ -169,11 +217,81 @@ store_operand:
     mov [ebx], edi
 
     ; ; proceed to the next node
-    jmp store_operand_loop
+    jmp read_operand_loop
 
-    store_operand_return:
-    ; TODO: increment the index and write in the correct spot
-    mov [operands_stack], ebx
+    read_operand_return:
+
+
+
+    mov     [ebp-4], ebx    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    mov     eax, [ebp-4]    ; place returned value where caller can see it
+    add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+; takes an address to an operand, and pushes it to the operand stack
+push_operand:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad   
+
+    mov ebx, [ebp + 8] ; address to the operand
+
+    inc byte [current_operand_index] 
+    call get_current_stack_address
+
+    mov dword [eax], ebx
+
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+; pops the top operand from the stack
+pop_stack:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    sub     esp, 4          ; Leave space for local var on stack
+    pushad   
+
+    call get_current_stack_address
+    mov eax, dword [eax]
+    dec byte [current_operand_index]
+
+    mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    mov     eax, [ebp-4]    ; place returned value where caller can see it
+    add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+; takes a pointer to an operand and frees it memory
+free_operand:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad   
+
+    mov ebx, [ebp + 8]
+
+    free_loop:
+    cmp ebx, 0
+    je free_end
+
+    mov eax, ebx
+    mov ebx, [ebx + 4] ; next ptr
+
+    push eax
+    call free
+    pop eax
+
+    jmp free_loop
+
+    free_end:
 
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
@@ -204,5 +322,66 @@ prompt_input:
     popad                   ; Restore caller state (registers)
     ;mov     eax, [ebp-4]    ; place returned value where caller can see it
    ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+
+
+
+; TODO
+get_current_stack_address:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    xor eax, eax
+    mov al, byte [current_operand_index]
+
+    mov ebx, 4
+    mul ebx
+
+    mov ebx, operands_stack
+    add eax, ebx
+
+    mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    mov     eax, [ebp-4]    ; place returned value where caller can see it
+    add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+    ; assuming input is valid, letters are uppercase
+charhex_to_decimal:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    mov eax, [ebp + 8]
+
+    cmp eax, 'A'
+    jge handle_char
+
+    jmp handle_num
+
+    ; if got here, the input is invalid!
+
+
+    handle_char:
+    sub eax, 'A'
+    add eax, 10
+
+    jmp charhex_to_decimal_ret
+
+    handle_num:
+    sub eax, '0'
+
+    charhex_to_decimal_ret:
+
+    mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    mov     eax, [ebp-4]    ; place returned value where caller can see it
+    add     esp, 4          ; Restore caller state
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
