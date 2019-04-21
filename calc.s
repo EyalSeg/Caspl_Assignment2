@@ -78,10 +78,14 @@ act_on_input:
     act_power:
         call get_current_stack_address
         mov eax, [eax]
+
+        xor ebx, ebx
+        push ebx
         push eax
         call shl_carry_operand
         pop eax
-        
+        pop ebx
+
         jmp act_on_input_end
 
     act_on_input_end:
@@ -201,6 +205,7 @@ duplicate_operand:
 
 ; adds two operands and stores the result as a new operand (returns a pointer to the result op)
 
+; takes an operand and a carry, and shifts it left (in place)
 shl_carry_operand:
     push    ebp             ; Save caller state
     mov     ebp, esp
@@ -208,17 +213,26 @@ shl_carry_operand:
     pushad                  ; Save some more caller state
 
     mov esi, [ebp + 8]
+    mov ecx, [ebp + 12] ; input carry
+    xor edx, edx        ; output carry
 
     cmp esi, 0
     je shl_operand_return
 
     mov bl, [esi]
-    rcl bl, 1
-    mov [esi], bl
+    shl bl, 1
+    jne shl_no_carry
 
+    mov edx, 1
+
+    shl_no_carry:
+    push edx ; push the output carry
+    or bl, cl ; add input carry
+    mov [esi], bl
     
-    ; if there is a carry and the next node is null, initiate a new node
-    jnc shl_operand_next
+    ; if there is a carry and the next node is null, instantiate a new node
+    cmp edx, 0
+    je shl_operand_next
 
     mov eax, dword [esi + 4]  ; point the current node's nextptr to the previous one
     cmp eax, 0
@@ -230,10 +244,12 @@ shl_carry_operand:
     call malloc
     pop edx
     mov byte [eax], 1
+    mov dword [eax + 4], 0
     
     ; point the current node's nextptr to the new node
     mov dword [esi + 4], eax
 
+    pop edx ; pop the output carry
     jmp shl_operand_return
 
     shl_operand_next:
@@ -241,6 +257,7 @@ shl_carry_operand:
     push esi
     call shl_carry_operand
     pop esi
+    pop edx
 
     shl_operand_return:
     ;mov     [ebp-4], eax    ; Save returned value...
