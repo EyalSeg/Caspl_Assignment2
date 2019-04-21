@@ -49,12 +49,12 @@ act_on_input:
 
     cmp al, 'q'
     je exit
-
     cmp al, '+'
     je act_add
-
     cmp al, 'd'
     je act_duplicate
+    cmp al, '^'
+    je act_power
 
     call read_operand
     push eax
@@ -73,6 +73,15 @@ act_on_input:
 
     act_duplicate:
         call duplicate_top_operand
+        jmp act_on_input_end
+
+    act_power:
+        call get_current_stack_address
+        mov eax, [eax]
+        push eax
+        call shl_carry_operand
+        pop eax
+        
         jmp act_on_input_end
 
     act_on_input_end:
@@ -187,6 +196,56 @@ duplicate_operand:
     ret                     ; Back to caller
 
 ; adds two operands and stores the result as a new operand (returns a pointer to the result op)
+
+shl_carry_operand:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    mov esi, [ebp + 8]
+
+    cmp esi, 0
+    je shl_operand_return
+
+    mov bl, [esi]
+    rcl bl, 1
+    mov [esi], bl
+
+    
+    ; if there is a carry and the next node is null, initiate a new node
+    jnc shl_operand_next
+
+    mov eax, dword [esi + 4]  ; point the current node's nextptr to the previous one
+    cmp eax, 0
+    jne shl_operand_next
+
+    ; init a new node
+    mov edx ,STRUCT_SIZE;
+    push edx
+    call malloc
+    pop edx
+    mov byte [eax], 1
+    
+    ; point the current node's nextptr to the new node
+    mov dword [esi + 4], eax
+
+    jmp shl_operand_return
+
+    shl_operand_next:
+    mov esi, [esi + 4]
+    push esi
+    call shl_carry_operand
+    pop esi
+
+    shl_operand_return:
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
 add_operands:
     push    ebp             ; Save caller state
     mov     ebp, esp
@@ -197,7 +256,7 @@ add_operands:
     mov esi, [ebp + 12]     ; operand 2
 
     mov ecx, ebx
-    xor ecx, esi
+    or ecx, esi
     xor edi, edi            ; output, initialized to null
 
     cmp ecx, 0 ; both operands are null
@@ -296,13 +355,36 @@ print_operand:
         cmp ebx, 0
         je print_operand_printloop
 
+        xor ecx, ecx
+        mov cl, 0xF
+        mov ch, 0xF0
+
         xor eax, eax
         mov al, [ebx]
+
+        and cl, al
+        and ch, al
+        shr ch, 4
+
+        ; push the lower digit
+        mov al, cl
         push  eax
         inc edi
-        
-        ;inc ebx
-        mov ebx, [ebx + 4] ; next ptr
+
+        ; push the upper digit
+        mov al, ch
+        push eax
+        inc edi
+
+        mov ebx, [ebx + 4] ; next ptr       
+
+        ; if it is the last node and the high digit is 0, pop it
+        cmp ebx, 0
+        jne print_operand_enstackloop
+        cmp ch, 0
+        jne print_operand_enstackloop
+        pop eax
+        dec edi
 
         jmp print_operand_enstackloop
 
@@ -346,68 +428,82 @@ read_operand:
     sub     esp, 4          ; Leave space for local var on stack
     pushad   
 
-    xor ebx, ebx ; previous node, init with null
+    xor edi, edi ; return value, initialized with null
     mov esi, input_buffer ; cursor. assuming input length < 80
 
-    read_operand_loop:
-    xor edi, edi
-    xor ecx, ecx
-    mov cl, byte [esi]
-    mov edi, ecx
-    inc esi
+    xor eax, eax
+    ; set esi to the end of the input
+    ; convert the input buffer to binary
+    read_operand_set_cursor_loop:
+        mov al, byte[esi]
 
-    cmp edi, 0
-    je read_operand_return 
+        cmp al, 0
+        je read_operand_set_cursor_end
+        cmp al, 10
+        je read_operand_set_cursor_end
 
-    ;create a new struct
-
-    mov edx ,STRUCT_SIZE;
-    push edx
-    call malloc
-    pop edx
-
-    mov dword [eax + 4], ebx  ; point the current node's nextptr to the previous one
-    mov ebx, eax        
-    
-    ; convert dh from hexa to binary
-    push edi
-    call charhex_to_decimal
-    pop edi
-    mov edi, eax
-
-    ;write the value to the current node
-    mov [ebx], al
-
-    ; read the next char
-    xor ecx, ecx
-    mov cl, [esi]
-    inc esi
-
-    cmp ecx, 0
-    je read_operand_return
+        push eax
+        call charhex_to_decimal
+        pop edx
 
 
-    ; convert dl from hexa to binary
-    push ecx
-    call charhex_to_decimal
-    pop ecx
-    mov ecx, eax
+        mov byte[esi], al
 
-    ; note that the left-most digit belongs to the 4 left bits
-    shl edi, 4
-    or edi, ecx
+        inc esi
+        jmp read_operand_set_cursor_loop
 
-    ; ;write the value to the current node
-    mov [ebx], edi
+    read_operand_set_cursor_end:
+    dec esi ; we don't want the \0 or \n
+    mov ecx, esi
+    push ecx ; store for later
 
-    ; ; proceed to the next node
-    jmp read_operand_loop
+    read_operand_allocate_space_loop:
+        cmp esi, input_buffer ; assign space for each character
+        jl read_operand_allocate_space_end
 
-    read_operand_return:
+        mov edx ,STRUCT_SIZE;
+        push edx
+        call malloc
+        pop edx
 
+        ; insert the new node at the beginning of the list
+        mov dword [eax + 4], edi
+        mov edi, eax
 
+        sub esi, 2 ; each node contains two characters
 
-    mov     [ebp-4], ebx    ; Save returned value...
+        jmp read_operand_allocate_space_loop
+
+    read_operand_allocate_space_end:
+    pop esi
+    mov [ebp-4], edi    ; Save returned value...
+
+    read_operand_write_loop:
+        cmp esi, input_buffer
+        jl read_operand_write_loop_end
+
+        xor ebx, ebx
+        mov bl, [esi]
+        dec esi
+
+        cmp esi, input_buffer
+        jl read_operand_write
+
+        mov bh, [esi]
+        shl bh, 4
+        or bl, bh
+
+        dec esi
+
+        read_operand_write:
+        mov [edi], bl
+        mov edi, [edi + 4] ; next ptr
+
+        jmp read_operand_write_loop
+        
+    read_operand_write_loop_end:
+
+    ;mov     [ebp-4], ebx    ; Save returned value...
     popad                   ; Restore caller state (registers)
     mov     eax, [ebp-4]    ; place returned value where caller can see it
     add     esp, 4          ; Restore caller state
@@ -512,7 +608,7 @@ prompt_input:
 
 
 
-; TODO
+
 get_current_stack_address:
     push    ebp             ; Save caller state
     mov     ebp, esp
