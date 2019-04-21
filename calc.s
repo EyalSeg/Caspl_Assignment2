@@ -124,6 +124,8 @@ add_top_operands:
     ;sub     esp, 4          ; Leave space for local var on stack
     pushad                  ; Save some more caller state
 
+    xor ebx, ebx
+    push ebx ; push 0 carry
     ; push two operands from the operands stack to the actual stack
     call pop_stack
     push eax 
@@ -144,6 +146,8 @@ add_top_operands:
 
     call free_operand 
     pop eax
+
+    pop ebx
 
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
@@ -246,6 +250,11 @@ shl_carry_operand:
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
 
+
+
+
+; input: op1, op2 operands, carry 
+; output: pointer to a new operand, op1+op2+carry
 add_operands:
     push    ebp             ; Save caller state
     mov     ebp, esp
@@ -254,6 +263,8 @@ add_operands:
 
     mov ebx, [ebp + 8]      ; operand 1
     mov esi, [ebp + 12]     ; operand 2
+                            ; carry exists at [ebp+16]
+    
 
     mov ecx, ebx
     or ecx, esi
@@ -264,7 +275,11 @@ add_operands:
     jmp add_operand_init_node
 
     add_operands_both_null:
-        jnc add_operands_return ; if both are null and there is no carry, we are done
+    ; if both are null and there is no carry, we are done
+        mov ecx, [ebp + 16]
+        cmp ecx, 0
+        je add_operands_return
+    
 
     add_operand_init_node:
         mov edx ,STRUCT_SIZE;
@@ -288,23 +303,40 @@ add_operands:
         cmp esi, 0
         je add_operands_join
 
-        mov dl, [esi]
+        mov ch, [esi]
         mov esi, [esi + 4] ; next ptr
 
     add_operands_join:
-        adc cl, dl
-        mov [edi], cl       ; write the value of the current node
+        mov edx, [ebp + 16]
+
+        add cl, dl
+        xor edx, edx ; set new carry to 0
+
+        jnc add_operands_nocarry1
+        mov edx, 1
+
+    add_operands_nocarry1:
+        add cl, ch
+        jnc add_operands_nocarry2
+
+        mov edx, 1
+    add_operands_nocarry2:
+
+    mov [edi], cl       ; write the value of the current node
 
     ; recursively calculate the next nodes
+    push edx
     push esi
     push ebx
     call add_operands
     pop ebx
     pop esi
+    pop edx
 
     mov dword [edi + 4], eax  ; point the next node to the returned value from the recursive call
 
     add_operands_return:
+
     mov     [ebp-4], edi    ; Save returned value...
     popad                   ; Restore caller state (registers)
     mov     eax, [ebp-4]    ; place returned value where caller can see it
