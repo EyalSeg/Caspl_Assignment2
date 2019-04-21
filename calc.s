@@ -7,6 +7,7 @@ section .data
     print_hex db '%X', 0
     print_char db '%c', 10, 0
     print_newLine db 10, 0
+    print_wrong_input db 'wrong input ', 10, 0
 
 
 section .bss
@@ -76,19 +77,75 @@ act_on_input:
         jmp act_on_input_end
 
     act_power:
-        call get_current_stack_address
-        mov eax, [eax]
-
-        xor ebx, ebx
-        push ebx
-        push eax
-        call shl_carry_operand
-        pop eax
-        pop ebx
-
+        call top_operands_power
         jmp act_on_input_end
 
     act_on_input_end:
+
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+top_operands_power:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad   
+
+    xor ecx, ecx
+    push ecx ; push 0 carry
+
+    call pop_stack
+    push eax
+    call pop_stack
+
+    cmp dword [eax + 4], 0 ; if the list contains two nodes, than it's value is greater than one byte (and specifically than 200)
+    jne power_wrong_input
+    mov bl, byte [eax] 
+    cmp bl, 200
+    jl power_wrong_input
+
+    push eax
+    call free_operand
+    pop eax
+
+    
+    ; note that the first operand is still in the stack
+    
+    top_operands_power_loop:
+        cmp bl, 1
+        jle top_operands_power_loop_end
+
+        call shl_carry_operand
+        dec bl
+        jmp top_operands_power_loop
+
+    top_operands_power_loop_end:
+
+     ;first operand still in the stack
+    call push_operand
+    pop eax
+    jmp top_operands_power_return
+
+    power_wrong_input:
+        push eax
+        call push_operand
+        pop eax
+
+        ; first operand was pushed earlier
+        call push_operand
+        pop eax
+
+        mov eax, print_wrong_input
+        push eax
+        call printf
+        pop eax
+
+    top_operands_power_return:
+    pop eax ; pop carry
 
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
