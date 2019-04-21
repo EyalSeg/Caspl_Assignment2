@@ -49,6 +49,9 @@ act_on_input:
     cmp al, 'p'
     je act_printandpop
 
+    cmp al, 'q'
+    je exit
+
     call read_operand
     push eax
     call push_operand
