@@ -55,7 +55,9 @@ act_on_input:
     cmp al, 'd'
     je act_duplicate
     cmp al, '^'
-    je act_power
+    je act_mulby2pow
+    cmp al, 'v'
+    je act_divby2pow
 
     call read_operand
     push eax
@@ -76,8 +78,12 @@ act_on_input:
         call duplicate_top_operand
         jmp act_on_input_end
 
-    act_power:
-        call top_operands_power
+    act_mulby2pow:
+        call mul_by_2power
+        jmp act_on_input_end
+
+    act_divby2pow:
+        call div_by_2power
         jmp act_on_input_end
 
     act_on_input_end:
@@ -89,7 +95,7 @@ act_on_input:
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
 
-top_operands_power:
+div_by_2power:
     push    ebp             ; Save caller state
     mov     ebp, esp
     ;sub     esp, 4          ; Leave space for local var on stack
@@ -103,10 +109,10 @@ top_operands_power:
     call pop_stack
 
     cmp dword [eax + 4], 0 ; if the list contains two nodes, than it's value is greater than one byte (and specifically than 200)
-    jne power_wrong_input
+    jne div_by_2power_wrong_input
     mov bl, byte [eax] 
     cmp bl, 200
-    jl power_wrong_input
+    jl div_by_2power_wrong_input
 
     push eax
     call free_operand
@@ -114,23 +120,23 @@ top_operands_power:
 
     
     ; note that the first operand is still in the stack
-    
-    top_operands_power_loop:
+
+    div_by_2power_loop:
         cmp bl, 1
-        jle top_operands_power_loop_end
+        jle div_by_2power_loop_end
 
-        call shl_carry_operand
+        call shr_operand
         dec bl
-        jmp top_operands_power_loop
+        jmp div_by_2power_loop
 
-    top_operands_power_loop_end:
+    div_by_2power_loop_end:
 
      ;first operand still in the stack
     call push_operand
     pop eax
-    jmp top_operands_power_return
+    jmp div_by_2power_return
 
-    power_wrong_input:
+    div_by_2power_wrong_input:
         push eax
         call push_operand
         pop eax
@@ -144,7 +150,72 @@ top_operands_power:
         call printf
         pop eax
 
-    top_operands_power_return:
+    div_by_2power_return:
+    pop eax ; pop carry
+
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+mul_by_2power:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad   
+
+    xor ecx, ecx
+    push ecx ; push 0 carry
+
+    call pop_stack
+    push eax
+    call pop_stack
+
+    cmp dword [eax + 4], 0 ; if the list contains two nodes, than it's value is greater than one byte (and specifically than 200)
+    jne mul_by_2power_wrong_input
+    mov bl, byte [eax] 
+    cmp bl, 200
+    jl mul_by_2power_wrong_input
+
+    push eax
+    call free_operand
+    pop eax
+
+    
+    ; note that the first operand is still in the stack
+
+    mul_by_2power_loop:
+        cmp bl, 1
+        jle mul_by_2power_loop_end
+
+        call shl_carry_operand
+        dec bl
+        jmp mul_by_2power_loop
+
+    mul_by_2power_loop_end:
+
+     ;first operand still in the stack
+    call push_operand
+    pop eax
+    jmp mul_by_2power_return
+
+    mul_by_2power_wrong_input:
+        push eax
+        call push_operand
+        pop eax
+
+        ; first operand was pushed earlier
+        call push_operand
+        pop eax
+
+        mov eax, print_wrong_input
+        push eax
+        call printf
+        pop eax
+
+    mul_by_2power_return:
     pop eax ; pop carry
 
     ;mov     [ebp-4], eax    ; Save returned value...
@@ -261,6 +332,72 @@ duplicate_operand:
     ret                     ; Back to caller
 
 ; adds two operands and stores the result as a new operand (returns a pointer to the result op)
+
+; takes an operand and shifts it right (in place). returns the preshift-lsb (which got shifted out)
+shr_operand:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    mov edi, [ebp + 8]
+    xor eax, eax ; the return value
+
+    cmp edi, 0
+    je shr_operand_return
+
+    xor ebx, ebx ; the leftmost bit to add after shift
+
+    mov esi, [edi + 4] ; nextptr
+    cmp esi, 0 ; if has no next pointer, skip to the edit part
+    jmp shr_operand_editnode
+
+    ; recursively shr
+    push esi
+    call shr_operand
+    pop esi
+
+    mov ebx, eax ; add the next pointer's lsb as the msb after shift
+
+    ; if esi's value is 0 and it is the last node, delete it
+    mov eax, [esi + 4] ; nextptr nextptr
+    cmp eax, 0
+    jne shr_operand_editnode
+
+    xor eax, eax
+    mov al, byte [esi]
+    cmp al, 0
+    jg shr_operand_editnode
+
+    ; delete the nextnode
+    push esi
+    call free
+    pop esi
+
+    mov dword [edi + 4], 0 ; set nextptr to 0
+
+    
+    shr_operand_editnode:
+        xor ecx, ecx
+        xor al, al
+        mov cl , byte [edi]
+
+        mov al, 1
+        and al, cl ; move the lsb to eax
+
+        shr cl, 1
+        shl bl, 7 
+        or cl, bl ; turn ebx (nextptr's lsb) into esx's msb
+
+        mov [edi], cl
+
+    shr_operand_return:
+    mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    mov     eax, [ebp-4]    ; place returned value where caller can see it
+    add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
 
 ; takes an operand and a carry, and shifts it left (in place)
 shl_carry_operand:
