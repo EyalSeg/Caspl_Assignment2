@@ -89,14 +89,72 @@ act_on_input:
         jmp act_on_input_end
 
     act_countones:
-        call get_current_stack_address
-        mov eax, [eax]
-        push eax
-        call inc_operand
-        pop eax
+        call count_bits_in_top
         jmp act_on_input_end
 
     act_on_input_end:
+
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+; pops the top-most operand, counts how many 1-bits it has and pushes a new operand with that number
+count_bits_in_top:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad  
+
+    call pop_stack
+    mov esi, eax            ; esi holds the top operand
+
+    ; init a zero'd counter operand
+    mov edx ,STRUCT_SIZE ; create a new node
+    push edx
+    call malloc
+    pop edx
+
+    mov edi, eax             ; edi holds the new counter operand
+    mov byte [edi], 0
+    mov dword [edi + 4], 0
+
+    push edi
+    call push_operand
+    ; keep edi in the stack, as we are going to call inc_operand on it
+
+
+    counts_bits_list_loop:
+        cmp esi, 0
+        je counts_bits_list_loop_end
+
+        mov al, [esi]
+        count_bits_node_loop:
+            cmp al, 0
+            je count_bits_node_loop_end
+
+            mov bl, 1
+            and bl, al
+            shr al, 1
+
+            cmp bl, 0
+            je count_bits_node_loop
+
+            call inc_operand
+            jmp count_bits_node_loop
+
+        count_bits_node_loop_end:
+        mov esi, [esi + 4]
+        jmp counts_bits_list_loop
+
+    counts_bits_list_loop_end:
+    pop edi
+
+    push esi
+    call free_operand
+    pop esi
 
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
@@ -946,7 +1004,6 @@ charhex_to_decimal:
     jmp handle_num
 
     ; if got here, the input is invalid!
-
 
     handle_char:
     sub eax, 'A'
