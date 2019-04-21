@@ -52,6 +52,9 @@ act_on_input:
     cmp al, 'q'
     je exit
 
+    cmp al, '+'
+    je act_add
+
     call read_operand
     push eax
     call push_operand
@@ -63,6 +66,10 @@ act_on_input:
         call print_and_pop        
         jmp act_on_input_end
 
+    act_add:
+        call add_top_operands
+        jmp act_on_input_end
+
     act_on_input_end:
 
     ;mov     [ebp-4], eax    ; Save returned value...
@@ -72,11 +79,113 @@ act_on_input:
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
 
+add_top_operands:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    ; push two operands from the operands stack to the actual stack
+    call pop_stack
+    push eax 
+    call pop_stack
+    push eax
+
+    ; push the addition result
+    call add_operands
+    push eax 
+
+    call push_operand
+
+    pop eax ; pop the result operand
+    
+    ;delete both operands (they are still on the stack)
+    call free_operand 
+    pop eax
+
+    call free_operand 
+    pop eax
+
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+    ;add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+add_operands:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    mov ebx, [ebp + 8]      ; operand 1
+    mov esi, [ebp + 12]     ; operand 2
+
+    mov ecx, ebx
+    xor ecx, esi
+    xor edi, edi            ; output, initialized to null
+
+    cmp ecx, 0 ; both operands are null
+    je add_operands_both_null
+    jmp add_operand_init_node
+
+    add_operands_both_null:
+        jnc add_operands_return ; if both are null and there is no carry, we are done
+
+    add_operand_init_node:
+        mov edx ,STRUCT_SIZE;
+        push edx
+        call malloc
+        pop edx
+
+        mov edi, eax ; store the new node's address
+
+    xor ecx, ecx
+    xor edx, edx
+
+    add_operands_op1:
+        cmp ebx, 0
+        je add_operands_op2
+
+        mov cl, [ebx]
+        mov ebx, [ebx + 4] ; next ptr
+
+    add_operands_op2:
+        cmp esi, 0
+        je add_operands_join
+
+        mov dl, [esi]
+        mov esi, [esi + 4] ; next ptr
+
+    add_operands_join:
+        adc cl, dl
+        mov [edi], cl       ; write the value of the current node
+
+    ; recursively calculate the next nodes
+    push esi
+    push ebx
+    call add_operands
+    pop ebx
+    pop esi
+
+    mov dword [edi + 4], eax  ; point the next node to the returned value from the recursive call
+
+    add_operands_return:
+    mov     [ebp-4], edi    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    mov     eax, [ebp-4]    ; place returned value where caller can see it
+    add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
 print_and_pop:
     push    ebp             ; Save caller state
     mov     ebp, esp
     ;sub     esp, 4          ; Leave space for local var on stack
     pushad                  ; Save some more caller state
+
+    
 
     call get_current_stack_address
     mov ebx, [eax]
@@ -180,9 +289,7 @@ read_operand:
 
     mov edx ,STRUCT_SIZE;
     push edx
-    ;push STRUCT_SIZE
     call malloc
-    ;add esp, 4 ; discard STRUCT_SIZE from the stack
     pop edx
 
     mov dword [eax + 4], ebx  ; point the current node's nextptr to the previous one
