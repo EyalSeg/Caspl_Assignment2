@@ -14,8 +14,6 @@ input_buffer resb 80
 operands_stack resd 5
 
 
-
-
 section .text
 
 align 16
@@ -55,6 +53,9 @@ act_on_input:
     cmp al, '+'
     je act_add
 
+    cmp al, 'd'
+    je act_duplicate
+
     call read_operand
     push eax
     call push_operand
@@ -70,7 +71,36 @@ act_on_input:
         call add_top_operands
         jmp act_on_input_end
 
+    act_duplicate:
+        call duplicate_top_operand
+        jmp act_on_input_end
+
     act_on_input_end:
+
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+duplicate_top_operand:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    ; get top operand
+    call get_current_stack_address
+    mov esi, [eax]
+
+    push esi
+    call duplicate_operand ; eax now holds the duplicated operand
+    pop esi
+
+    push eax
+    call push_operand
+    pop eax
 
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
@@ -113,6 +143,50 @@ add_top_operands:
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
 
+; duplicates an operand and returns a pointer to the new operand created
+duplicate_operand:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
+
+    mov esi, [ebp + 8]
+    xor edi, edi
+
+    cmp esi, 0
+    je duplicate_operand_return
+
+    mov edx ,STRUCT_SIZE ; create a new node
+    push edx
+    call malloc
+    pop edx
+
+    mov edi, eax ; store new node as edi
+
+    ; copy source value to destination node
+    xor ebx, ebx
+    mov bl, [esi]
+    mov [edi], bl
+
+    ; recursively duplicate the next nodes
+    mov esi, [esi + 4] ; next ptr
+    push esi
+    call duplicate_operand
+    pop esi
+
+    mov dword [edi + 4], eax  ; point the next node to the returned value from the recursive call
+
+
+    duplicate_operand_return:
+
+    mov     [ebp-4], edi    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    mov     eax, [ebp-4]    ; place returned value where caller can see it
+    add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
+; adds two operands and stores the result as a new operand (returns a pointer to the result op)
 add_operands:
     push    ebp             ; Save caller state
     mov     ebp, esp
