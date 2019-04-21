@@ -58,6 +58,8 @@ act_on_input:
     je act_mulby2pow
     cmp al, 'v'
     je act_divby2pow
+    cmp al, 'n'
+    je act_countones
 
     call read_operand
     push eax
@@ -84,6 +86,14 @@ act_on_input:
 
     act_divby2pow:
         call div_by_2power
+        jmp act_on_input_end
+
+    act_countones:
+        call get_current_stack_address
+        mov eax, [eax]
+        push eax
+        call inc_operand
+        pop eax
         jmp act_on_input_end
 
     act_on_input_end:
@@ -555,13 +565,60 @@ add_operands:
     pop     ebp             ; Restore caller state
     ret                     ; Back to caller
 
+
+inc_operand:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad      
+
+    mov esi, [ebp + 8]
+
+    mov al, [esi]
+    cmp al, 0xFF
+    je inc_operand_propagate
+
+    inc al
+    mov [esi], al
+    jmp inc_operand_return
+
+    inc_operand_propagate:
+    mov byte [esi], 0
+
+    mov eax, [esi + 4] ; nextptr
+    cmp eax, 0
+    jne inc_operand_recursive
+
+    mov edx ,STRUCT_SIZE;
+    push edx
+    call malloc
+    pop edx
+
+    mov [esi + 4], eax
+    mov byte [eax], 1
+    mov dword [eax + 4], 0
+
+    jmp inc_operand_return
+
+    inc_operand_recursive:
+    mov esi, [esi + 4]
+    push esi
+    call inc_operand
+    pop esi
+
+    inc_operand_return:
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
+
 print_and_pop:
     push    ebp             ; Save caller state
     mov     ebp, esp
     ;sub     esp, 4          ; Leave space for local var on stack
     pushad                  ; Save some more caller state
-
-    
 
     call get_current_stack_address
     mov ebx, [eax]
