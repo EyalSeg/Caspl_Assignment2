@@ -4,6 +4,7 @@
 section .data
     prompt_msg db  'calc: ', 0x0 
     current_operand_index db -1
+    is_debug_mode db 0
     print_hex db '%X', 0
     print_char db '%c', 10, 0
     print_newLine db 10, 0
@@ -28,9 +29,16 @@ align 16
      extern fgets
 
 main:
+    push ebp
+    mov ebp , esp
+    cmp dword[ebp+8] , 1 
+    jng main_loop
+    inc byte[is_debug_mode]
+    main_loop:
     call prompt_input
     call act_on_input
-    jmp main
+    jmp main_loop
+    pop esp
 
 exit: 
     mov     eax, 1 ; exit
@@ -651,6 +659,7 @@ inc_operand:
     push edx
     call malloc
     pop edx
+    call free_operand
 
     mov [esi + 4], eax
     mov byte [eax], 1
@@ -823,7 +832,6 @@ read_operand:
         push edx
         call malloc
         pop edx
-
         ; insert the new node at the beginning of the list
         mov dword [eax + 4], edi
         mov edi, eax
@@ -858,9 +866,8 @@ read_operand:
         mov edi, [edi + 4] ; next ptr
 
         jmp read_operand_write_loop
-        
-    read_operand_write_loop_end:
 
+    read_operand_write_loop_end:
     ;mov     [ebp-4], ebx    ; Save returned value...
     popad                   ; Restore caller state (registers)
     mov     eax, [ebp-4]    ; place returned value where caller can see it
@@ -881,7 +888,13 @@ push_operand:
     call get_current_stack_address
 
     mov dword [eax], ebx
+    cmp byte[is_debug_mode] , 1
+    jne push_return
+    push ebx
+    call print_operand
+    pop ebx
 
+    push_return:
     ;mov     [ebp-4], eax    ; Save returned value...
     popad                   ; Restore caller state (registers)
     ;mov     eax, [ebp-4]    ; place returned value where caller can see it
