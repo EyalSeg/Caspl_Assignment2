@@ -41,6 +41,9 @@ main:
     pop esp
 
 exit: 
+
+    call free_stack 
+
     mov     eax, 1 ; exit
     mov     ebx, 0 ; return value
     int     0x80
@@ -668,12 +671,10 @@ inc_operand:
     jmp inc_operand_return
 
     inc_operand_recursive:
-    ; mov esi, [esi + 4]
-    ; push esi
-    push eax
+    mov esi, [esi + 4]
+    push esi
     call inc_operand
-    pop eax
-    ; pop esi
+    pop esi
 
     inc_operand_return:
     ;mov     [ebp-4], eax    ; Save returned value...
@@ -979,7 +980,32 @@ prompt_input:
     ret                     ; Back to caller
 
 
+free_stack:
+    push    ebp             ; Save caller state
+    mov     ebp, esp
+    ;sub     esp, 4          ; Leave space for local var on stack
+    pushad                  ; Save some more caller state
 
+
+    free_stack_loop:
+    mov al, byte [current_operand_index]
+    cmp al, -1 ; -1 means the stack is empty
+    jle free_end
+
+    call pop_stack
+    push eax
+    call free_operand
+    pop eax
+
+    jmp free_stack_loop
+
+    free_stack_end:
+    ;mov     [ebp-4], eax    ; Save returned value...
+    popad                   ; Restore caller state (registers)
+    ;mov     eax, [ebp-4]    ; place returned value where caller can see it
+   ; add     esp, 4          ; Restore caller state
+    pop     ebp             ; Restore caller state
+    ret                     ; Back to caller
 
 
 get_current_stack_address:
