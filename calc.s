@@ -118,6 +118,7 @@ count_bits_in_top:
 
     call pop_stack
     mov esi, eax            ; esi holds the top operand
+    push esi                ; store it so we can free it later
 
     ; init a zero'd counter operand
     mov edx ,STRUCT_SIZE ; create a new node
@@ -160,7 +161,7 @@ count_bits_in_top:
     counts_bits_list_loop_end:
     pop edi
 
-    push esi
+    ; original operand address is still in the stack
     call free_operand
     pop esi
 
@@ -659,7 +660,6 @@ inc_operand:
     push edx
     call malloc
     pop edx
-    call free_operand
 
     mov [esi + 4], eax
     mov byte [eax], 1
@@ -668,10 +668,12 @@ inc_operand:
     jmp inc_operand_return
 
     inc_operand_recursive:
-    mov esi, [esi + 4]
-    push esi
+    ; mov esi, [esi + 4]
+    ; push esi
+    push eax
     call inc_operand
-    pop esi
+    pop eax
+    ; pop esi
 
     inc_operand_return:
     ;mov     [ebp-4], eax    ; Save returned value...
