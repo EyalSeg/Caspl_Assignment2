@@ -4,11 +4,14 @@
 section .data
     prompt_msg db  'calc: ', 0x0 
     current_operand_index db -1
+    opcount db 0
+
     is_debug_mode db 0
     print_hex db '%X', 0
     print_char db '%c', 10, 0
     print_newLine db 10, 0
     print_wrong_input db 'wrong input ', 10, 0
+    print_decimal db '%d', 10, 0
 
 
 section .bss
@@ -41,6 +44,17 @@ main:
     pop esp
 
 exit: 
+
+    xor eax, eax
+
+    mov al, byte [opcount]
+    mov ebx, print_decimal
+
+    push eax
+    push ebx
+    call printf
+    pop ebx
+    pop eax
 
     call free_stack 
 
@@ -80,26 +94,38 @@ act_on_input:
     jmp act_on_input_end
 
     act_printandpop:
+        inc byte [opcount] 
+
         call print_and_pop        
         jmp act_on_input_end
 
     act_add:
+        inc byte [opcount] 
+
         call add_top_operands
         jmp act_on_input_end
 
     act_duplicate:
+        inc byte [opcount] 
+
         call duplicate_top_operand
         jmp act_on_input_end
 
     act_mulby2pow:
+        inc byte [opcount] 
+
         call mul_by_2power
         jmp act_on_input_end
 
     act_divby2pow:
+        inc byte [opcount] 
+
         call div_by_2power
         jmp act_on_input_end
 
     act_countones:
+        inc byte [opcount] 
+
         call count_bits_in_top
         jmp act_on_input_end
 
